@@ -98,6 +98,7 @@ type severity int32 // sync/atomic int32
 // A message written to a high-severity log file is also written to each
 // lower-severity log file.
 const (
+	// 日志级别
 	infoLog severity = iota
 	warningLog
 	errorLog
@@ -116,11 +117,13 @@ var severityName = []string{
 
 // get returns the value of the severity.
 func (s *severity) get() severity {
+	// 返回日志级别
 	return severity(atomic.LoadInt32((*int32)(s)))
 }
 
 // set sets the value of the severity.
 func (s *severity) set(val severity) {
+	// 设置日志级别
 	atomic.StoreInt32((*int32)(s), int32(val))
 }
 
@@ -155,6 +158,7 @@ func severityByName(s string) (severity, bool) {
 	s = strings.ToUpper(s)
 	for i, name := range severityName {
 		if name == s {
+			// 返回日志级别
 			return severity(i), true
 		}
 	}
@@ -169,11 +173,13 @@ type OutputStats struct {
 
 // Lines returns the number of lines written.
 func (s *OutputStats) Lines() int64 {
+	// 返回行
 	return atomic.LoadInt64(&s.lines)
 }
 
 // Bytes returns the number of bytes written.
 func (s *OutputStats) Bytes() int64 {
+	// 返回字节数
 	return atomic.LoadInt64(&s.bytes)
 }
 
@@ -183,6 +189,7 @@ var Stats struct {
 	Info, Warning, Error OutputStats
 }
 
+// 设置日志数组
 var severityStats = [numSeverity]*OutputStats{
 	infoLog:    &Stats.Info,
 	warningLog: &Stats.Warning,
@@ -251,9 +258,11 @@ type modulePat struct {
 // match reports whether the file matches the pattern. It uses a string
 // comparison if the pattern contains no metacharacters.
 func (m *modulePat) match(file string) bool {
+	// 如果是字符亮
 	if m.literal {
 		return file == m.pattern
 	}
+	// reports whether name matches the shell file name pattern
 	match, _ := filepath.Match(m.pattern, file)
 	return match
 }
@@ -398,15 +407,19 @@ type flushSyncWriter interface {
 func init() {
 	flag.BoolVar(&logging.toStderr, "logtostderr", false, "log to standard error instead of files")
 	flag.BoolVar(&logging.alsoToStderr, "alsologtostderr", false, "log to standard error as well as files")
+	// 设置默认的debug日志级别
 	flag.Var(&logging.verbosity, "v", "log level for V logs")
 	flag.Var(&logging.stderrThreshold, "stderrthreshold", "logs at or above this threshold go to stderr")
 	flag.Var(&logging.vmodule, "vmodule", "comma-separated list of pattern=N settings for file-filtered logging")
+	// 设置栈
 	flag.Var(&logging.traceLocation, "log_backtrace_at", "when logging hits line file:N, emit a stack trace")
 
 	// Default stderrThreshold is ERROR.
+	// 日杂级别为error才会打印到标准输出中
 	logging.stderrThreshold = errorLog
-
+	// 设置V的级别
 	logging.setVState(0, nil, false)
+	// 建立一个守护协程
 	go logging.flushDaemon()
 }
 
@@ -457,11 +470,14 @@ type loggingT struct {
 
 // buffer holds a byte Buffer for reuse. The zero value is ready for use.
 type buffer struct {
+	// 使用接口内嵌
 	bytes.Buffer
-	tmp  [64]byte // temporary byte array for creating headers.
+	tmp [64]byte // temporary byte array for creating headers.
+	// 指向下一个buffer
 	next *buffer
 }
 
+// 全局的变量
 var logging loggingT
 
 // setVState sets a consistent state for V logging.
@@ -489,12 +505,16 @@ func (l *loggingT) getBuffer() *buffer {
 	l.freeListMu.Lock()
 	b := l.freeList
 	if b != nil {
+		// 设置下一个取buffer为b.next
 		l.freeList = b.next
 	}
 	l.freeListMu.Unlock()
+	//. 如果没有buffer了，那么新建一个
 	if b == nil {
+		// new buffer
 		b = new(buffer)
 	} else {
+		// 将这个buffer重置
 		b.next = nil
 		b.Reset()
 	}
@@ -513,6 +533,7 @@ func (l *loggingT) putBuffer(b *buffer) {
 	l.freeListMu.Unlock()
 }
 
+// 方便依赖注入
 var timeNow = time.Now // Stubbed out for testing.
 
 /*
@@ -533,12 +554,14 @@ where the fields are defined as follows:
 	msg              The user-supplied message
 */
 func (l *loggingT) header(s severity, depth int) (*buffer, string, int) {
+	// H获取调用者的文件名，行数
 	_, file, line, ok := runtime.Caller(3 + depth)
 	if !ok {
 		file = "???"
 		line = 1
 	} else {
 		slash := strings.LastIndex(file, "/")
+		// 取文件名/*  */
 		if slash >= 0 {
 			file = file[slash+1:]
 		}
@@ -548,6 +571,7 @@ func (l *loggingT) header(s severity, depth int) (*buffer, string, int) {
 
 // formatHeader formats a log header using the provided file name and line number.
 func (l *loggingT) formatHeader(s severity, file string, line int) *buffer {
+	// 组成改行的时间
 	now := timeNow()
 	if line < 0 {
 		line = 0 // not a real line number, but acceptable to someDigits
@@ -676,6 +700,7 @@ func (l *loggingT) output(s severity, buf *buffer, file string, line int, alsoTo
 		}
 	}
 	data := buf.Bytes()
+	//  在使用前必须用flag.Parse
 	if !flag.Parsed() {
 		os.Stderr.Write([]byte("ERROR: logging before flag.Parse: "))
 		os.Stderr.Write(data)
@@ -808,6 +833,7 @@ type syncBuffer struct {
 }
 
 func (sb *syncBuffer) Sync() error {
+	// sync contents of file to stable sotreage
 	return sb.file.Sync()
 }
 
@@ -879,6 +905,7 @@ const flushInterval = 30 * time.Second
 
 // flushDaemon periodically flushes the log file buffers.
 func (l *loggingT) flushDaemon() {
+	// 30s 刷新一下日志
 	for _ = range time.NewTicker(flushInterval).C {
 		l.lockAndFlushAll()
 	}
@@ -895,6 +922,7 @@ func (l *loggingT) lockAndFlushAll() {
 // l.mu is held.
 func (l *loggingT) flushAll() {
 	// Flush from fatal down, in case there's trouble flushing.
+	// 日志级别从大到小开始刷
 	for s := fatalLog; s >= infoLog; s-- {
 		file := l.file[s]
 		if file != nil {
