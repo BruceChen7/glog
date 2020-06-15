@@ -42,13 +42,17 @@ var logDir = flag.String("log_dir", "", "If non-empty, write log files in this d
 
 func createLogDirs() {
 	if *logDir != "" {
+		// 多个打印日志1的目录
 		logDirs = append(logDirs, *logDir)
 	}
+
+	//  /tmp目录或者是$TMPDIR
 	logDirs = append(logDirs, os.TempDir())
 }
 
 var (
-	pid      = os.Getpid()
+	pid = os.Getpid()
+	// return the last element of path 获取当前文件的程序名
 	program  = filepath.Base(os.Args[0])
 	host     = "unknownhost"
 	userName = "unknownuser"
@@ -57,9 +61,10 @@ var (
 func init() {
 	h, err := os.Hostname()
 	if err == nil {
+		// 获取主机名
 		host = shortHostname(h)
 	}
-
+	// 获取用户名
 	current, err := user.Current()
 	if err == nil {
 		userName = current.Username
@@ -104,17 +109,22 @@ var onceLogDirs sync.Once
 // errors.
 func create(tag string, t time.Time) (f *os.File, filename string, err error) {
 	onceLogDirs.Do(createLogDirs)
+	//  打印日志目录找不到直接报错
 	if len(logDirs) == 0 {
 		return nil, "", errors.New("log: no log dirs")
 	}
+	// 获取日志名称
+	// link是xxxx.INFO, xxx.ERROR这种符号连接
 	name, link := logName(tag, t)
 	var lastErr error
 	for _, dir := range logDirs {
 		fname := filepath.Join(dir, name)
+		// 创建文件
 		f, err := os.Create(fname)
 		if err == nil {
 			symlink := filepath.Join(dir, link)
-			os.Remove(symlink)        // ignore err
+			os.Remove(symlink) // ignore err
+			// 重新生成符号连接，
 			os.Symlink(name, symlink) // ignore err
 			return f, fname, nil
 		}

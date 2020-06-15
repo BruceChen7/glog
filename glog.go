@@ -527,6 +527,7 @@ func (l *loggingT) putBuffer(b *buffer) {
 		// Let big buffers die a natural death.
 		return
 	}
+	// 返回到free-list
 	l.freeListMu.Lock()
 	b.next = l.freeList
 	l.freeList = b
@@ -662,9 +663,12 @@ func (l *loggingT) print(s severity, args ...interface{}) {
 }
 
 func (l *loggingT) printDepth(s severity, depth int, args ...interface{}) {
+	// 创建日志的头
 	buf, file, line := l.header(s, depth)
+	// 用户自定义的的日志写到buffer中
 	fmt.Fprint(buf, args...)
 	if buf.Bytes()[buf.Len()-1] != '\n' {
+		// 最后yi
 		buf.WriteByte('\n')
 	}
 	l.output(s, buf, file, line, false)
@@ -699,23 +703,27 @@ func (l *loggingT) output(s severity, buf *buffer, file string, line int, alsoTo
 			buf.Write(stacks(false))
 		}
 	}
+	// 获取数据
 	data := buf.Bytes()
 	//  在使用前必须用flag.Parse
 	if !flag.Parsed() {
 		os.Stderr.Write([]byte("ERROR: logging before flag.Parse: "))
 		os.Stderr.Write(data)
 	} else if l.toStderr {
+		// 把数据写到标准输出
 		os.Stderr.Write(data)
 	} else {
 		if alsoToStderr || l.alsoToStderr || s >= l.stderrThreshold.get() {
 			os.Stderr.Write(data)
 		}
+		// 如果该日志级别文件没有创建
 		if l.file[s] == nil {
 			if err := l.createFiles(s); err != nil {
 				os.Stderr.Write(data) // Make sure the message appears somewhere.
 				l.exit(err)
 			}
 		}
+		// 对应级别的日志进行写入相关数据
 		switch s {
 		case fatalLog:
 			l.file[fatalLog].Write(data)
@@ -827,8 +835,9 @@ func (l *loggingT) exit(err error) {
 type syncBuffer struct {
 	logger *loggingT
 	*bufio.Writer
-	file   *os.File
-	sev    severity
+	file *os.File
+	sev  severity
+	// 已经被写入的字节数
 	nbytes uint64 // The number of bytes written to this file
 }
 
@@ -838,11 +847,15 @@ func (sb *syncBuffer) Sync() error {
 }
 
 func (sb *syncBuffer) Write(p []byte) (n int, err error) {
+	// 如果超过了最大的字节数
 	if sb.nbytes+uint64(len(p)) >= MaxSize {
+		// 将日志归档，创建失败，直接退出进程
+		// 比较暴力
 		if err := sb.rotateFile(time.Now()); err != nil {
 			sb.logger.exit(err)
 		}
 	}
+	// 直接写入数据，写入失败，直接退出进程
 	n, err = sb.Writer.Write(p)
 	sb.nbytes += uint64(n)
 	if err != nil {
@@ -858,16 +871,20 @@ func (sb *syncBuffer) rotateFile(now time.Time) error {
 		sb.file.Close()
 	}
 	var err error
+	// 创建新的日志文件
 	sb.file, _, err = create(severityName[sb.sev], now)
 	sb.nbytes = 0
 	if err != nil {
 		return err
 	}
-
+	// 创建bufio
+	// 我们看到bufferSize在后面创建
 	sb.Writer = bufio.NewWriterSize(sb.file, bufferSize)
 
 	// Write header.
 	var buf bytes.Buffer
+	// 注意方式
+	// 每个日志的开头都是这样的注释信息
 	fmt.Fprintf(&buf, "Log file created at: %s\n", now.Format("2006/01/02 15:04:05"))
 	fmt.Fprintf(&buf, "Running on machine: %s\n", host)
 	fmt.Fprintf(&buf, "Binary: Built with %s %s for %s/%s\n", runtime.Compiler, runtime.Version(), runtime.GOOS, runtime.GOARCH)
@@ -880,6 +897,7 @@ func (sb *syncBuffer) rotateFile(now time.Time) error {
 // bufferSize sizes the buffer associated with each log file. It's large
 // so that log records can accumulate without the logging thread blocking
 // on disk I/O. The flushDaemon will block instead.
+// 256个字节
 const bufferSize = 256 * 1024
 
 // createFiles creates all the log files for severity from sev down to infoLog.
@@ -888,6 +906,7 @@ func (l *loggingT) createFiles(sev severity) error {
 	now := time.Now()
 	// Files are created in decreasing severity order, so as soon as we find one
 	// has already been created, we can stop.
+	// 每个日志级别都新建相关的文件
 	for s := sev; s >= infoLog && l.file[s] == nil; s-- {
 		sb := &syncBuffer{
 			logger: l,
@@ -926,6 +945,7 @@ func (l *loggingT) flushAll() {
 	for s := fatalLog; s >= infoLog; s-- {
 		file := l.file[s]
 		if file != nil {
+			// 对每个日志级别刷盘
 			file.Flush() // ignore error
 			file.Sync()  // ignore error
 		}
@@ -1055,6 +1075,7 @@ func V(level Level) Verbose {
 
 // Info is equivalent to the global Info function, guarded by the value of v.
 // See the documentation of V for usage.
+// 这种动作比较骚气
 func (v Verbose) Info(args ...interface{}) {
 	if v {
 		logging.print(infoLog, args...)
@@ -1077,6 +1098,7 @@ func (v Verbose) Infof(format string, args ...interface{}) {
 	}
 }
 
+// 这些都是暴露的接口
 // Info logs to the INFO log.
 // Arguments are handled in the manner of fmt.Print; a newline is appended if missing.
 func Info(args ...interface{}) {
